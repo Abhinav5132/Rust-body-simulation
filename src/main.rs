@@ -1,7 +1,8 @@
-use bevy::prelude::*;
+use bevy::{prelude::*, transform};
 use bevy::input::ButtonState;
 use bevy::input::keyboard::{Key, KeyboardInput};
-
+use bevy::render::camera;
+use rand::prelude::*;
 
 #[derive(Resource)]
 struct no_of_particle(u32);
@@ -9,11 +10,27 @@ struct no_of_particle(u32);
 #[derive(Resource)]
 struct TextID(Option<Entity>);
 
+#[derive(Resource)]
+struct CameraBounds{
+	x_min:i32,
+	x_max:i32,
+	y_min:i32,
+	y_max:i32,
+}
+
 #[derive(States, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum GameStates{
     textState,
     simulationstate,
 }
+
+struct particle{
+	pos:[i32; 2],
+	vec:[i32; 2],
+	mass:i32,
+	radius:i32,
+}
+
 
 fn main() {
    let mut app = App::new();
@@ -30,15 +47,35 @@ fn main() {
 
    //simulation state 
    ;
-
-
     app.run();
 }
 
 fn spawn_camera(
-    mut commands: Commands
+    mut commands: Commands,
 ) {
     commands.spawn(Camera2d);// spawn the camera
+}
+
+fn camera_bounds(
+	mut commands: Commands,
+	mut camera_bound: Query<(&Camera, &GlobalTransform), With<Camera2d>>,
+) -> Option<(i32, i32, i32, i32)> {
+	let (camera, transform) = camera_bound.single();
+
+	let viewport_size = camera.logical_viewport_size()?; // Option<Vec2>
+    let center = transform.translation().truncate();
+
+    let half_size = viewport_size / 2.0;
+
+    let min = center - half_size;
+    let max = center + half_size;
+
+	Some((
+        min.x.floor() as i32,
+        max.x.ceil() as i32,
+        min.y.floor() as i32,
+        max.y.ceil() as i32,
+    ))
 }
 
 fn text_setup(
@@ -107,4 +144,9 @@ fn text_update(
             _ => {}
         }
     } 
+}
+
+fn create_all_entitites(){
+
+
 }
