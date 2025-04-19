@@ -6,13 +6,12 @@ use bevy::window::{WindowMode, WindowResolution};
 
 
 /*todo: make sure bodies dont spawn outside the area, this can be done in the create all entites where we iterate through them all, 
-check for collisions with the boundry and if it does remove 
-2: adding all the particles to a list 
-3.spawning boundries and checking for collisions with the boundry objects
-4.Make them move with an initial velocity
+check for collisions with the boundry and if it does remove  
+3.turn the resolution into actual parameters so users can resize the screen
 5.collissions with each other
 5.gravity
 6. make the r key restart the simulation
+7.particle only bounce from the wall if their center touches, need to make it so it takes the radisu and bounces from that
 */
 
 #[derive(Resource)]
@@ -43,11 +42,6 @@ struct Particle{
 	radius:u64,
 }
 
-/*#[derive(Resource)]
-struct particles_list{
-    particles:Vec<Entity>
-}
- */
 fn main() {
    let mut app = App::new();
 
@@ -65,9 +59,7 @@ fn main() {
    .insert_resource(NoOfParticle(10)) //10 for now
    .insert_resource(TextID(None))
    .insert_resource(CameraBounds{x_min:-960., x_max:960., y_min:-540., y_max:540.})
-   //.insert_resource(particles_list{particles: Vec::new()})
    .add_systems(Startup, spawn_camera)
-    //.add_systems(Startup, camera_bounds)
     // first state code
    .insert_state(GameStates::TextState)
    .add_systems(OnEnter(GameStates::TextState), text_setup)
@@ -85,26 +77,6 @@ fn spawn_camera(
 ) {
     commands.spawn(Camera2d);// spawn the camera
 }
-
-/*fn camera_bounds(
-	mut camera_bound: Query<(&Camera, &GlobalTransform), With<Camera2d>>,
-    mut cam_bound: ResMut<CameraBounds>
-){
-	let (camera, transform) = camera_bound.single();
-
-	if let Some(viewport_size) = camera.logical_viewport_size(){ // Option<Vec2>
-        let center = transform.translation().truncate();
-
-        let half_size = viewport_size / 2.0;
-
-        let min = center - half_size;
-        let max = center + half_size;
-        cam_bound.x_min = min.x.floor();
-        cam_bound.x_max = max.x.ceil(); 
-        cam_bound.y_min = min.y.floor();
-        cam_bound.y_max = max.y.ceil();
-    }
-} */
 
 fn text_setup(
 	mut commands: Commands,
@@ -187,17 +159,9 @@ fn create_all_entitites(
 
     let assumed_density = 55; // in kg/m3
 
-    let cam_x_max = camera_bound.x_max.round() as i32;
-    let cam_x_min = camera_bound.x_min.round() as i32;
-    let cam_y_max = camera_bound.y_max.round() as i32;
-    let cam_y_min = camera_bound.y_min.round() as i32;
-
-    
-
-
         for _i in 0..no_of_part.0{
-        let x = fastrand::i32(cam_x_min..cam_x_max); //CHANGE this to not be inclusive of borders
-        let y = fastrand::i32(cam_y_min..cam_y_max);
+        let x = fastrand::i32(camera_bound.x_min as i32..camera_bound.x_max as i32); //CHANGE this to not be inclusive of borders
+        let y = fastrand::i32(camera_bound.y_min as i32..camera_bound.y_max as i32);
         let vx = fastrand::f32() * if fastrand::bool() {1.0} else {-1.0};
         let vy = fastrand::f32() * if fastrand::bool() {1.0} else {-1.0};
 
@@ -223,16 +187,14 @@ fn create_all_entitites(
         MeshMaterial2d(materials.add(color)),
         Transform::from_xyz(x as f32, y as f32, 0.0),
         ));
-
-        //particles_list.particles.push(part); // allows for future acess to particles.
     }
 
 }
 
 fn update_all_entities(
-   //mut particles: ResMut<particles_list>,
    mut commands: Commands,
-   mut query: Query<(&mut Particle, &mut Transform)>
+   mut query: Query<(&mut Particle, &mut Transform)>,
+   camera_bound : ResMut<CameraBounds>,
 ){ // this is where all the particles are moved and gravity 
 
 // moving particles with their initial velocity
@@ -240,12 +202,19 @@ fn update_all_entities(
     //fn update_position(mut query: Query<(&mut Particle, &mut Transform)>){
     for (mut particle, mut transform) in query.iter_mut(){
 
-        // updating the position of the particle 
-        particle.pos[0] += particle.vel[0];
-        particle.pos[1] += particle.vel[1];
-
-        // updating the position of the visual.
+        if particle.pos[0] + particle.vel[0] >= camera_bound.x_max 
+        || particle.pos[0] + particle.vel[0] <= camera_bound.x_min{
+            particle.vel[0] = particle.vel[0] * -1.0;   
+        } 
+        
+        particle.pos[0] += particle.vel[0] ;
         transform.translation.x = particle.pos[0];
+
+        if particle.pos[1] + particle.vel[1] >= camera_bound.y_max 
+        || particle.pos[1] + particle.vel[1] <= camera_bound.y_min{
+            particle.vel[1] = particle.vel[1] * -1.0;
+        } 
+        particle.pos[1] += particle.vel[1];
         transform.translation.y = particle.pos[1];
     //update_position(query);
 }
