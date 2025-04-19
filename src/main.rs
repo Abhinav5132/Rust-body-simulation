@@ -1,3 +1,4 @@
+
 use bevy::prelude::*;
 use bevy::input::ButtonState;
 use bevy::input::keyboard::{Key, KeyboardInput};
@@ -11,10 +12,11 @@ check for collisions with the boundry and if it does remove
 4.Make them move with an initial velocity
 5.collissions with each other
 5.gravity
+6. make the r key restart the simulation
 */
 
 #[derive(Resource)]
-struct no_of_particle(u32);
+struct NoOfParticle(u32);
 
 #[derive(Resource)]
 struct TextID(Option<Entity>);
@@ -29,8 +31,8 @@ struct CameraBounds{
 
 #[derive(States, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum GameStates{
-    textState,
-    simulationstate,
+    TextState,
+    SimulationState,
 }
 
 #[derive(Component)]
@@ -41,15 +43,15 @@ struct Particle{
 	radius:u64,
 }
 
-#[derive(Resource)]
+/*#[derive(Resource)]
 struct particles_list{
     particles:Vec<Entity>
 }
-
+ */
 fn main() {
    let mut app = App::new();
 
-   app.add_plugins((DefaultPlugins.set(
+   app.add_plugins(DefaultPlugins.set(
     WindowPlugin{
         primary_window: Some(Window{
             resolution: WindowResolution::new(1920., 1080.).with_scale_factor_override(1.0),
@@ -59,19 +61,21 @@ fn main() {
         ..default()
     }
 
-   )))
-   .insert_resource(no_of_particle(10)) //10 for now
+   ))
+   .insert_resource(NoOfParticle(10)) //10 for now
    .insert_resource(TextID(None))
    .insert_resource(CameraBounds{x_min:-960., x_max:960., y_min:-540., y_max:540.})
+   //.insert_resource(particles_list{particles: Vec::new()})
    .add_systems(Startup, spawn_camera)
     //.add_systems(Startup, camera_bounds)
     // first state code
-   .insert_state(GameStates::textState)
-   .add_systems(OnEnter(GameStates::textState), text_setup)
-   .add_systems(Update, text_update.run_if(in_state(GameStates::textState)))
+   .insert_state(GameStates::TextState)
+   .add_systems(OnEnter(GameStates::TextState), text_setup)
+   .add_systems(Update, text_update.run_if(in_state(GameStates::TextState)))
 
    //simulation state
-   .add_systems(OnEnter(GameStates::simulationstate), create_all_entitites)
+   .add_systems(OnEnter(GameStates::SimulationState), create_all_entitites)
+   .add_systems(Update, update_all_entities.run_if(in_state(GameStates::SimulationState)))
    ;
     app.run();
 }
@@ -108,7 +112,7 @@ fn text_setup(
 	mut text_id: ResMut<TextID>,
 ) {
     
-    let mut id_text = commands.spawn(( // spawn in the text
+    let id_text = commands.spawn(( // spawn in the text
         Text::new("Please enter the number of bodies:"),
         TextFont{
             font: asset_server.load("fonts/BungeeSpice-Regular.ttf"),
@@ -130,7 +134,7 @@ fn text_setup(
 fn text_update(
 	mut commands: Commands,
     mut evr_kbd : EventReader<KeyboardInput>,
-    mut NoOfParticle: ResMut<no_of_particle>,
+    no_of_particle: ResMut<NoOfParticle>,
 	mut text_id: ResMut<TextID>,
 	mut next_state: ResMut<NextState<GameStates>>,
 ) {
@@ -158,7 +162,7 @@ fn text_update(
 					text_id.0 = None; // Clear the resource if needed
 				}
 
-				next_state.set(GameStates::simulationstate);
+				next_state.set(GameStates::SimulationState);
             }
 
             Key::Backspace => {
@@ -173,9 +177,10 @@ fn text_update(
 fn create_all_entitites(
     mut commands: Commands,
     camera_bound: ResMut<CameraBounds>,
-    no_of_part: ResMut<no_of_particle>,
+    no_of_part: ResMut<NoOfParticle>,
     mut materials: ResMut<Assets<ColorMaterial>>,
     mut meshes: ResMut<Assets<Mesh>>,
+    //mut particles_list: ResMut<particles_list>
 ){
     let mass_max = 2000 as u64; //in kg
     let mass_min = 1000 as u64;
@@ -190,13 +195,15 @@ fn create_all_entitites(
     
 
 
-        for i in (0..no_of_part.0){
-        let mut x = fastrand::i32(cam_x_min..cam_x_max); //CHANGE this to not be inclusive of borders
-        let mut y = fastrand::i32(cam_y_min..cam_y_max);
+        for _i in 0..no_of_part.0{
+        let x = fastrand::i32(cam_x_min..cam_x_max); //CHANGE this to not be inclusive of borders
+        let y = fastrand::i32(cam_y_min..cam_y_max);
+        let vx = fastrand::f32() * if fastrand::bool() {1.0} else {-1.0};
+        let vy = fastrand::f32() * if fastrand::bool() {1.0} else {-1.0};
 
-        let mut mass = fastrand::u64(mass_min..mass_max);
+        let mass = fastrand::u64(mass_min..mass_max);
 
-        let radius:u64 = (mass / assumed_density );
+        let radius:u64 = mass / assumed_density; // prolly better to fully randomise it 
 
         let color = ColorMaterial::from(Color::linear_rgb(
             fastrand::f32(),
@@ -207,7 +214,7 @@ fn create_all_entitites(
         commands.spawn((
             Particle {
             pos: [x as f32,y as f32],
-            vel: [0.0, 0.0],
+            vel: [vx, vy],
             mass: mass,
             radius: radius,
 
@@ -216,6 +223,30 @@ fn create_all_entitites(
         MeshMaterial2d(materials.add(color)),
         Transform::from_xyz(x as f32, y as f32, 0.0),
         ));
+
+        //particles_list.particles.push(part); // allows for future acess to particles.
     }
 
+}
+
+fn update_all_entities(
+   //mut particles: ResMut<particles_list>,
+   mut commands: Commands,
+   mut query: Query<(&mut Particle, &mut Transform)>
+){ // this is where all the particles are moved and gravity 
+
+// moving particles with their initial velocity
+
+    //fn update_position(mut query: Query<(&mut Particle, &mut Transform)>){
+    for (mut particle, mut transform) in query.iter_mut(){
+
+        // updating the position of the particle 
+        particle.pos[0] += particle.vel[0];
+        particle.pos[1] += particle.vel[1];
+
+        // updating the position of the visual.
+        transform.translation.x = particle.pos[0];
+        transform.translation.y = particle.pos[1];
+    //update_position(query);
+}
 }
