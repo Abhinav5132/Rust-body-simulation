@@ -1,7 +1,17 @@
 use bevy::prelude::*;
 use bevy::input::ButtonState;
 use bevy::input::keyboard::{Key, KeyboardInput};
+use bevy::window::{WindowMode, WindowResolution};
 
+
+/*todo: make sure bodies dont spawn outside the area, this can be done in the create all entites where we iterate through them all, 
+check for collisions with the boundry and if it does remove 
+2: adding all the particles to a list 
+3.spawning boundries and checking for collisions with the boundry objects
+4.Make them move with an initial velocity
+5.collissions with each other
+5.gravity
+*/
 
 #[derive(Resource)]
 struct no_of_particle(u32);
@@ -39,12 +49,22 @@ struct particles_list{
 fn main() {
    let mut app = App::new();
 
-   app.add_plugins((DefaultPlugins))
+   app.add_plugins((DefaultPlugins.set(
+    WindowPlugin{
+        primary_window: Some(Window{
+            resolution: WindowResolution::new(1920., 1080.).with_scale_factor_override(1.0),
+            mode: WindowMode::Fullscreen(MonitorSelection::Primary),
+            ..default()
+        }),
+        ..default()
+    }
+
+   )))
    .insert_resource(no_of_particle(10)) //10 for now
    .insert_resource(TextID(None))
-   .insert_resource(CameraBounds{x_min:0.0, x_max:0.0, y_min:0.0, y_max:0.0})
+   .insert_resource(CameraBounds{x_min:-960., x_max:960., y_min:-540., y_max:540.})
    .add_systems(Startup, spawn_camera)
-   .add_systems(Startup, camera_bounds)
+    //.add_systems(Startup, camera_bounds)
     // first state code
    .insert_state(GameStates::textState)
    .add_systems(OnEnter(GameStates::textState), text_setup)
@@ -62,7 +82,7 @@ fn spawn_camera(
     commands.spawn(Camera2d);// spawn the camera
 }
 
-fn camera_bounds(
+/*fn camera_bounds(
 	mut camera_bound: Query<(&Camera, &GlobalTransform), With<Camera2d>>,
     mut cam_bound: ResMut<CameraBounds>
 ){
@@ -80,7 +100,7 @@ fn camera_bounds(
         cam_bound.y_min = min.y.floor();
         cam_bound.y_max = max.y.ceil();
     }
-}
+} */
 
 fn text_setup(
 	mut commands: Commands,
@@ -157,10 +177,10 @@ fn create_all_entitites(
     mut materials: ResMut<Assets<ColorMaterial>>,
     mut meshes: ResMut<Assets<Mesh>>,
 ){
-    let mass_max = 10E24 as u64; //in kg
-    let mass_min = 0.0 as u64;
+    let mass_max = 2000 as u64; //in kg
+    let mass_min = 1000 as u64;
 
-    let assumed_density = 5515; // in kg/m3
+    let assumed_density = 55; // in kg/m3
 
     let cam_x_max = camera_bound.x_max.round() as i32;
     let cam_x_min = camera_bound.x_min.round() as i32;
@@ -176,12 +196,12 @@ fn create_all_entitites(
 
         let mut mass = fastrand::u64(mass_min..mass_max);
 
-        let radius:u64 = (mass / assumed_density).pow(1/3);
+        let radius:u64 = (mass / assumed_density );
 
         let color = ColorMaterial::from(Color::linear_rgb(
-            fastrand::i32(0..256) as f32,
-            fastrand::i32(0..256) as f32,
-            fastrand::i32(0..256) as f32,
+            fastrand::f32(),
+            fastrand::f32(),
+            fastrand::f32(),
             ));
         
         commands.spawn((
