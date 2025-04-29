@@ -1,10 +1,15 @@
 
+
+use std::collections;
+
+use bevy::log::tracing_subscriber::field::debug;
 use bevy::prelude::*;
 use bevy::input::ButtonState;
 use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::window::{WindowMode, WindowResolution};
+use classes::KdNode;
 
-
+mod classes;
 /*todo: make sure bodies dont spawn outside the area, this can be done in the create all entites where we iterate through them all, 
 check for collisions with the boundry and if it does remove  
 3.turn the resolution into actual parameters so users can resize the screen
@@ -34,12 +39,17 @@ enum GameStates{
     SimulationState,
 }
 
-#[derive(Component)]
+#[derive(Component, Debug, Clone)]
 struct Particle{
+    name: String,
 	pos:[f32; 2],
 	vel:[f32; 2],
 	mass:u64,
 	radius:u64,
+}
+#[derive(Resource)]
+struct particles_list{
+    particles:Vec<Entity>
 }
 
 fn main() {
@@ -56,10 +66,12 @@ fn main() {
     }
 
    ))
-   .insert_resource(NoOfParticle(10)) //10 for now
+   .insert_resource(NoOfParticle(100)) //10 for now
    .insert_resource(TextID(None))
    .insert_resource(CameraBounds{x_min:-960., x_max:960., y_min:-540., y_max:540.})
+   .insert_resource(particles_list{particles: Vec::new()})
    .add_systems(Startup, spawn_camera)
+
     // first state code
    .insert_state(GameStates::TextState)
    .add_systems(OnEnter(GameStates::TextState), text_setup)
@@ -68,6 +80,8 @@ fn main() {
    //simulation state
    .add_systems(OnEnter(GameStates::SimulationState), create_all_entitites)
    .add_systems(Update, update_all_entities.run_if(in_state(GameStates::SimulationState)))
+   .add_systems(Update, kd_tree_collisions.run_if(in_state(GameStates::SimulationState)))
+   //.add_systems(Update, check_collision.run_if(in_state(GameStates::SimulationState)))
    ;
     app.run();
 }
@@ -152,22 +166,21 @@ fn create_all_entitites(
     no_of_part: ResMut<NoOfParticle>,
     mut materials: ResMut<Assets<ColorMaterial>>,
     mut meshes: ResMut<Assets<Mesh>>,
-    //mut particles_list: ResMut<particles_list>
+    mut particles_list: ResMut<particles_list>
 ){
     let mass_max = 2000 as u64; //in kg
     let mass_min = 1000 as u64;
 
     let assumed_density = 55; // in kg/m3
 
-        for _i in 0..no_of_part.0{
+        for i in 0..no_of_part.0{
         let x = fastrand::i32(camera_bound.x_min as i32..camera_bound.x_max as i32); //CHANGE this to not be inclusive of borders
         let y = fastrand::i32(camera_bound.y_min as i32..camera_bound.y_max as i32);
         let vx = fastrand::f32() * if fastrand::bool() {1.0} else {-1.0};
         let vy = fastrand::f32() * if fastrand::bool() {1.0} else {-1.0};
-
         let mass = fastrand::u64(mass_min..mass_max);
 
-        let radius:u64 = mass / assumed_density; // prolly better to fully randomise it 
+        let radius:u64 = mass / (assumed_density * 4); // prolly better to fully randomise it 
 
         let color = ColorMaterial::from(Color::linear_rgb(
             fastrand::f32(),
@@ -175,8 +188,9 @@ fn create_all_entitites(
             fastrand::f32(),
             ));
         
-        commands.spawn((
+        let part = commands.spawn((
             Particle {
+            name: format!("Particle {}", i),
             pos: [x as f32,y as f32],
             vel: [vx, vy],
             mass: mass,
@@ -186,7 +200,9 @@ fn create_all_entitites(
         Mesh2d(meshes.add(Circle::new(radius as f32))),
         MeshMaterial2d(materials.add(color)),
         Transform::from_xyz(x as f32, y as f32, 0.0),
-        ));
+        )).id();
+
+        particles_list.particles.push(part);
     }
 
 }
@@ -215,7 +231,71 @@ fn update_all_entities(
             particle.vel[1] = particle.vel[1] * -1.0;
         } 
         particle.pos[1] += particle.vel[1];
-        transform.translation.y = particle.pos[1];
+        transform.translation.y = particle.pos[1]; }
     //update_position(query);
+
 }
+
+fn check_collision(mut query: Query<(&mut Particle, &mut Transform)>) {
+
+    let mut bodies: Vec<_>  = query.iter_mut().collect();
+        for i in 0..bodies.len() {
+            let (left, right) = bodies.split_at_mut(i+1);
+            let (part_a, trans_a) = &mut left[i];
+            for j in i+1..right.len(){
+                let(part_b, transform_b) = &mut right[j];
+
+                let dx = part_a.pos[0] - part_b.pos[0];
+                let dy = part_a.pos[1] - part_b.pos[1];
+
+                let dist_square = dx * dx + dy * dy;
+                let radius_sum = (part_a.radius + part_b.radius) as f32;
+
+                if dist_square <= radius_sum * radius_sum {
+                    part_a.vel[0] *= -1.0;
+                    part_a.vel[1] *= -1.0;
+
+                    part_b.vel[0] *= -1.0;
+                    part_b.vel[1] *= -1.0; 
+                
+                    
+                }
+                /* 
+                println!(
+                    "Particle A: pos=({:.2}, {:.2}), vel=({:.2}, {:.2})",
+                    part_a.pos[0], part_a.pos[1], part_a.vel[0], part_a.vel[1]
+                );
+                println!(
+                    "Particle B: pos=({:.2}, {:.2}), vel=({:.2}, {:.2})",
+                    part_b.pos[0], part_b.pos[1], part_b.vel[0], part_b.vel[1]
+                );
+                println!("Distance squared: {:.2}, Radius sum squared: {:.2}", dist_square, radius_sum * radius_sum); */
+            }   
+        }
+
+                
+}
+
+fn kd_tree_collisions(mut query: Query<&mut Particle>) {
+
+    let mut bodies: Vec<_> = query.iter().map(|p| p.clone()).collect();
+
+    if let Some(tree) = KdNode::build(bodies, 0) {
+        for mut particle in query.iter_mut(){
+            let mut collisions = Vec::new();
+            tree.check_collison(&mut particle,&mut collisions);
+
+            for (other, nx, ny) in collisions{
+                let m1 = particle.mass as f32;
+                let m2 = particle.mass as f32;
+
+                let bounciness = 0.8;
+                let j = -(1.0 + bounciness) * ((particle.vel[0] - other.vel[0]) * nx + (particle.vel[1] - other.vel[1]) * ny) / (1.0/m1 + 1.0/m2);
+            
+                particle.vel[0] += (j / m1) * nx;
+                particle.vel[1] += (j / m1) * ny;
+
+            }
+        }
+    }
 }
