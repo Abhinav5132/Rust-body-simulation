@@ -1,6 +1,6 @@
-use bevy::math::Vec2;
+
 use bevy::prelude::*;
-use crate::{check_collision, particles_list, Particle};
+use crate::Particle;
 
 #[derive(Debug)]
 pub struct KdNode {
@@ -63,7 +63,7 @@ impl KdNode{
 
     }
 
-    pub fn check_collison(&self, particle: &Particle, collisions: &mut Vec<(Particle, f32, f32)>) {
+    pub fn check_collison(&self, particle: &Particle, collisions: &mut Vec<(Particle, f32, f32, f32, f32)>) {
 
         if let Some(ref node_particle) = self.particle {
             if node_particle.pos != particle.pos {
@@ -77,7 +77,11 @@ impl KdNode{
                     let nx = dx / dist;
                     let ny = dy / dist;
 
-                    collisions.push((node_particle.clone(), nx, ny));
+                    let overlap = radius_sum - dist;
+                    let sep_x = overlap * 0.5 * nx;
+                    let sep_y = overlap * 0.5 * ny;
+
+                    collisions.push((node_particle.clone(), nx, ny, sep_x, sep_y));
                 }
             }
         }

@@ -1,8 +1,4 @@
 
-
-use std::collections;
-
-use bevy::log::tracing_subscriber::field::debug;
 use bevy::prelude::*;
 use bevy::input::ButtonState;
 use bevy::input::keyboard::{Key, KeyboardInput};
@@ -66,7 +62,7 @@ fn main() {
     }
 
    ))
-   .insert_resource(NoOfParticle(100)) //10 for now
+   .insert_resource(NoOfParticle(500)) //10 for now
    .insert_resource(TextID(None))
    .insert_resource(CameraBounds{x_min:-960., x_max:960., y_min:-540., y_max:540.})
    .insert_resource(particles_list{particles: Vec::new()})
@@ -282,10 +278,13 @@ fn kd_tree_collisions(mut query: Query<&mut Particle>) {
 
     if let Some(tree) = KdNode::build(bodies, 0) {
         for mut particle in query.iter_mut(){
-            let mut collisions = Vec::new();
+            let mut collisions: Vec<(Particle, f32, f32, f32, f32)> = Vec::new();
             tree.check_collison(&mut particle,&mut collisions);
 
-            for (other, nx, ny) in collisions{
+            for (other, nx, ny, sep_x, sep_y) in collisions{
+                particle.pos[0] += sep_x;
+                particle.pos[1] += sep_y;
+
                 let m1 = particle.mass as f32;
                 let m2 = particle.mass as f32;
 
