@@ -49,8 +49,8 @@ impl KdNode{
         node.split_value = split_value;
         node.particle = Some(sorted_particles[median].clone());
 
-        let mut left_part = Vec::from(&sorted_particles[..median]);
-        let mut right_part = Vec::from(&sorted_particles[median + 1 ..]);
+        let left_part = Vec::from(&sorted_particles[..median]);
+        let right_part = Vec::from(&sorted_particles[median + 1 ..]);
 
         if median > 0 {
             node.left = KdNode::build(left_part, depth + 1);

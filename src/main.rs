@@ -1,9 +1,10 @@
-
 use bevy::prelude::*;
 use bevy::input::ButtonState;
 use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::window::{WindowMode, WindowResolution};
 use classes::KdNode;
+use bevy_dev_tools::fps_overlay::{FpsOverlayConfig, FpsOverlayPlugin};
+
 
 mod classes;
 /*todo: make sure bodies dont spawn outside the area, this can be done in the create all entites where we iterate through them all, 
@@ -14,6 +15,12 @@ check for collisions with the boundry and if it does remove
 6. make the r key restart the simulation
 7.particle only bounce from the wall if their center touches, need to make it so it takes the radisu and bounces from that
 */
+
+#[derive(Component)]
+struct FpsText;
+
+#[derive(Resource)]
+struct GravitationalConstant(f32);
 
 #[derive(Resource)]
 struct NoOfParticle(u32);
@@ -37,35 +44,33 @@ enum GameStates{
 
 #[derive(Component, Debug, Clone)]
 struct Particle{
-    name: String,
 	pos:[f32; 2],
 	vel:[f32; 2],
 	mass:u64,
 	radius:u64,
 }
-#[derive(Resource)]
-struct particles_list{
-    particles:Vec<Entity>
-}
+
 
 fn main() {
    let mut app = App::new();
 
-   app.add_plugins(DefaultPlugins.set(
+   app.add_plugins((DefaultPlugins.set(
     WindowPlugin{
         primary_window: Some(Window{
             resolution: WindowResolution::new(1920., 1080.).with_scale_factor_override(1.0),
-            mode: WindowMode::Fullscreen(MonitorSelection::Primary),
+            mode: WindowMode::Fullscreen(MonitorSelection::Primary, VideoModeSelection::Current),
             ..default()
         }),
         ..default()
     }
 
-   ))
-   .insert_resource(NoOfParticle(500)) //10 for now
+   ),FpsOverlayPlugin::default()))
+
+
+   .insert_resource(NoOfParticle(4000)) //10 for now
    .insert_resource(TextID(None))
    .insert_resource(CameraBounds{x_min:-960., x_max:960., y_min:-540., y_max:540.})
-   .insert_resource(particles_list{particles: Vec::new()})
+   .insert_resource(GravitationalConstant(6.67430E10))
    .add_systems(Startup, spawn_camera)
 
     // first state code
@@ -77,6 +82,7 @@ fn main() {
    .add_systems(OnEnter(GameStates::SimulationState), create_all_entitites)
    .add_systems(Update, update_all_entities.run_if(in_state(GameStates::SimulationState)))
    .add_systems(Update, kd_tree_collisions.run_if(in_state(GameStates::SimulationState)))
+   //.add_systems(Update, gravity_normal.run_if(in_state(GameStates::SimulationState)))
    //.add_systems(Update, check_collision.run_if(in_state(GameStates::SimulationState)))
    ;
     app.run();
@@ -113,10 +119,10 @@ fn text_setup(
 	text_id.0 = Some(id_text); // some means something of any type 
 }
 
+
 fn text_update(
 	mut commands: Commands,
     mut evr_kbd : EventReader<KeyboardInput>,
-    no_of_particle: ResMut<NoOfParticle>,
 	mut text_id: ResMut<TextID>,
 	mut next_state: ResMut<NextState<GameStates>>,
 ) {
@@ -140,7 +146,7 @@ fn text_update(
 				//write to Noofparticle
 
                 if let Some(entity) = text_id.0 {
-					commands.entity(entity).despawn_recursive(); // despawn UI text
+					commands.entity(entity); // despawn UI text
 					text_id.0 = None; // Clear the resource if needed
 				}
 
@@ -162,7 +168,6 @@ fn create_all_entitites(
     no_of_part: ResMut<NoOfParticle>,
     mut materials: ResMut<Assets<ColorMaterial>>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut particles_list: ResMut<particles_list>
 ){
     let mass_max = 2000 as u64; //in kg
     let mass_min = 1000 as u64;
@@ -176,7 +181,7 @@ fn create_all_entitites(
         let vy = fastrand::f32() * if fastrand::bool() {1.0} else {-1.0};
         let mass = fastrand::u64(mass_min..mass_max);
 
-        let radius:u64 = mass / (assumed_density * 4); // prolly better to fully randomise it 
+        let radius:u64 = mass / (assumed_density * 6); // prolly better to fully randomise it 
 
         let color = ColorMaterial::from(Color::linear_rgb(
             fastrand::f32(),
@@ -184,9 +189,8 @@ fn create_all_entitites(
             fastrand::f32(),
             ));
         
-        let part = commands.spawn((
+            commands.spawn((
             Particle {
-            name: format!("Particle {}", i),
             pos: [x as f32,y as f32],
             vel: [vx, vy],
             mass: mass,
@@ -196,15 +200,14 @@ fn create_all_entitites(
         Mesh2d(meshes.add(Circle::new(radius as f32))),
         MeshMaterial2d(materials.add(color)),
         Transform::from_xyz(x as f32, y as f32, 0.0),
-        )).id();
+        ));
 
-        particles_list.particles.push(part);
+
     }
 
 }
 
 fn update_all_entities(
-   mut commands: Commands,
    mut query: Query<(&mut Particle, &mut Transform)>,
    camera_bound : ResMut<CameraBounds>,
 ){ // this is where all the particles are moved and gravity 
@@ -256,16 +259,6 @@ fn check_collision(mut query: Query<(&mut Particle, &mut Transform)>) {
                 
                     
                 }
-                /* 
-                println!(
-                    "Particle A: pos=({:.2}, {:.2}), vel=({:.2}, {:.2})",
-                    part_a.pos[0], part_a.pos[1], part_a.vel[0], part_a.vel[1]
-                );
-                println!(
-                    "Particle B: pos=({:.2}, {:.2}), vel=({:.2}, {:.2})",
-                    part_b.pos[0], part_b.pos[1], part_b.vel[0], part_b.vel[1]
-                );
-                println!("Distance squared: {:.2}, Radius sum squared: {:.2}", dist_square, radius_sum * radius_sum); */
             }   
         }
 
@@ -274,7 +267,7 @@ fn check_collision(mut query: Query<(&mut Particle, &mut Transform)>) {
 
 fn kd_tree_collisions(mut query: Query<&mut Particle>) {
 
-    let mut bodies: Vec<_> = query.iter().map(|p| p.clone()).collect();
+    let bodies: Vec<_> = query.iter().map(|p| p.clone()).collect();
 
     if let Some(tree) = KdNode::build(bodies, 0) {
         for mut particle in query.iter_mut(){
@@ -295,6 +288,39 @@ fn kd_tree_collisions(mut query: Query<&mut Particle>) {
                 particle.vel[1] += (j / m1) * ny;
 
             }
+        }
+    }
+}
+
+fn gravity_normal(query: Query<&mut Particle>, gravity: Res<GravitationalConstant>) {
+let mut particles : Vec<_> = query.iter().map(|p| p.clone()).collect();
+
+    for i in 0..particles.len(){
+        let (left, right) = particles.split_at_mut(i+1);
+        let part_a = &mut left[i];
+        for j in i+1..right.len(){
+            let part_b = &mut right[j];
+
+            let dx = part_a.pos[0] - part_b.pos[0];
+            let dy = part_a.pos[1] - part_b.pos[1];
+
+            let dist_square = dx * dx + dy * dy;
+
+            let force = (gravity.0 * part_a.mass as f32 * part_b.mass as f32) / dist_square;
+
+            let distance = dist_square.sqrt();
+            let nx = dx / distance;
+            let ny = dy / distance;
+
+            let vx = nx * force;
+            let vy = ny * force;
+
+            part_a.vel[0] -= vx;
+            part_a.vel[1] -= vy;
+
+            part_b.vel[0] -= vx;
+            part_b.vel[1] -= vy;
+
         }
     }
 }
