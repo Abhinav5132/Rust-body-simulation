@@ -3,7 +3,7 @@ use bevy::input::ButtonState;
 use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::window::{WindowMode, WindowResolution};
 use classes::KdNode;
-use bevy_dev_tools::fps_overlay::{FpsOverlayConfig, FpsOverlayPlugin};
+use bevy_dev_tools::fps_overlay:: FpsOverlayPlugin;
 
 
 mod classes;
@@ -67,10 +67,10 @@ fn main() {
    ),FpsOverlayPlugin::default()))
 
 
-   .insert_resource(NoOfParticle(4000)) //10 for now
+   .insert_resource(NoOfParticle(3000)) //10 for now
    .insert_resource(TextID(None))
    .insert_resource(CameraBounds{x_min:-960., x_max:960., y_min:-540., y_max:540.})
-   .insert_resource(GravitationalConstant(6.67430E10))
+   .insert_resource(GravitationalConstant(6.67430E15))
    .add_systems(Startup, spawn_camera)
 
     // first state code
@@ -82,8 +82,8 @@ fn main() {
    .add_systems(OnEnter(GameStates::SimulationState), create_all_entitites)
    .add_systems(Update, update_all_entities.run_if(in_state(GameStates::SimulationState)))
    .add_systems(Update, kd_tree_collisions.run_if(in_state(GameStates::SimulationState)))
-   //.add_systems(Update, gravity_normal.run_if(in_state(GameStates::SimulationState)))
-   //.add_systems(Update, check_collision.run_if(in_state(GameStates::SimulationState)))
+   .add_systems(Update, _gravity_normal.run_if(in_state(GameStates::SimulationState)))
+   //.add_systems(Update, _check_collision.run_if(in_state(GameStates::SimulationState)))
    ;
     app.run();
 }
@@ -146,7 +146,7 @@ fn text_update(
 				//write to Noofparticle
 
                 if let Some(entity) = text_id.0 {
-					commands.entity(entity); // despawn UI text
+					commands.entity(entity).despawn(); // despawn UI text
 					text_id.0 = None; // Clear the resource if needed
 				}
 
@@ -174,14 +174,14 @@ fn create_all_entitites(
 
     let assumed_density = 55; // in kg/m3
 
-        for i in 0..no_of_part.0{
+        for _i in 0..no_of_part.0{
         let x = fastrand::i32(camera_bound.x_min as i32..camera_bound.x_max as i32); //CHANGE this to not be inclusive of borders
         let y = fastrand::i32(camera_bound.y_min as i32..camera_bound.y_max as i32);
         let vx = fastrand::f32() * if fastrand::bool() {1.0} else {-1.0};
         let vy = fastrand::f32() * if fastrand::bool() {1.0} else {-1.0};
         let mass = fastrand::u64(mass_min..mass_max);
 
-        let radius:u64 = mass / (assumed_density * 6); // prolly better to fully randomise it 
+        let radius:u64 = mass / (assumed_density * 8); // prolly better to fully randomise it 
 
         let color = ColorMaterial::from(Color::linear_rgb(
             fastrand::f32(),
@@ -235,14 +235,14 @@ fn update_all_entities(
 
 }
 
-fn check_collision(mut query: Query<(&mut Particle, &mut Transform)>) {
+fn _check_collision(mut query: Query<&mut Particle>) {
 
     let mut bodies: Vec<_>  = query.iter_mut().collect();
         for i in 0..bodies.len() {
             let (left, right) = bodies.split_at_mut(i+1);
-            let (part_a, trans_a) = &mut left[i];
+            let part_a = &mut left[i];
             for j in i+1..right.len(){
-                let(part_b, transform_b) = &mut right[j];
+                let part_b = &mut right[j];
 
                 let dx = part_a.pos[0] - part_b.pos[0];
                 let dy = part_a.pos[1] - part_b.pos[1];
@@ -292,7 +292,7 @@ fn kd_tree_collisions(mut query: Query<&mut Particle>) {
     }
 }
 
-fn gravity_normal(query: Query<&mut Particle>, gravity: Res<GravitationalConstant>) {
+fn _gravity_normal(query: Query<&mut Particle>, gravity: Res<GravitationalConstant>) {
 let mut particles : Vec<_> = query.iter().map(|p| p.clone()).collect();
 
     for i in 0..particles.len(){
