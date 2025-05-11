@@ -1,6 +1,7 @@
 
 use bevy::prelude::*;
 use crate::Particle;
+use std::ops::Range;
 
 #[derive(Debug)]
 pub struct KdNode {
@@ -109,5 +110,4 @@ impl KdNode{
     }
 
 }
-
 

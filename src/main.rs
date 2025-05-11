@@ -4,8 +4,9 @@ use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::window::{WindowMode, WindowResolution};
 use classes::KdNode;
 use bevy_dev_tools::fps_overlay:: FpsOverlayPlugin;
+use crate::quad::node;
 
-
+mod quad;
 mod classes;
 /*todo: make sure bodies dont spawn outside the area, this can be done in the create all entites where we iterate through them all, 
 check for collisions with the boundry and if it does remove  
@@ -15,6 +16,8 @@ check for collisions with the boundry and if it does remove
 6. make the r key restart the simulation
 7.particle only bounce from the wall if their center touches, need to make it so it takes the radisu and bounces from that
 */
+#[derive(Resource)]
+pub struct BarnesHutTheta(pub f32);
 
 #[derive(Component)]
 struct FpsText;
@@ -31,8 +34,8 @@ struct TextID(Option<Entity>);
 #[derive(Resource)]
 struct CameraBounds{
 	x_min:f32,
+    y_min:f32,
 	x_max:f32,
-	y_min:f32,
 	y_max:f32,
 }
 
@@ -42,7 +45,7 @@ enum GameStates{
     SimulationState,
 }
 
-#[derive(Component, Debug, Clone)]
+#[derive(Component, Debug, Clone, Copy)]
 struct Particle{
 	pos:[f32; 2],
 	vel:[f32; 2],
@@ -67,10 +70,11 @@ fn main() {
    ),FpsOverlayPlugin::default()))
 
 
-   .insert_resource(NoOfParticle(3000)) //10 for now
+   .insert_resource(NoOfParticle(4000)) //10 for now
    .insert_resource(TextID(None))
    .insert_resource(CameraBounds{x_min:-960., x_max:960., y_min:-540., y_max:540.})
-   .insert_resource(GravitationalConstant(6.67430E15))
+   .insert_resource(GravitationalConstant(6.67430e-5))
+   .insert_resource(BarnesHutTheta(1.0))
    .add_systems(Startup, spawn_camera)
 
     // first state code
@@ -82,7 +86,8 @@ fn main() {
    .add_systems(OnEnter(GameStates::SimulationState), create_all_entitites)
    .add_systems(Update, update_all_entities.run_if(in_state(GameStates::SimulationState)))
    .add_systems(Update, kd_tree_collisions.run_if(in_state(GameStates::SimulationState)))
-   .add_systems(Update, _gravity_normal.run_if(in_state(GameStates::SimulationState)))
+   .add_systems(Update, gravity_quad.run_if(in_state(GameStates::SimulationState)))
+   //.add_systems(Update, _gravity_normal.run_if(in_state(GameStates::SimulationState)))
    //.add_systems(Update, _check_collision.run_if(in_state(GameStates::SimulationState)))
    ;
     app.run();
@@ -179,9 +184,11 @@ fn create_all_entitites(
         let y = fastrand::i32(camera_bound.y_min as i32..camera_bound.y_max as i32);
         let vx = fastrand::f32() * if fastrand::bool() {1.0} else {-1.0};
         let vy = fastrand::f32() * if fastrand::bool() {1.0} else {-1.0};
+        //let vx = 0.0;
+        //let vy = 0.0;
         let mass = fastrand::u64(mass_min..mass_max);
 
-        let radius:u64 = mass / (assumed_density * 8); // prolly better to fully randomise it 
+        let radius:u64 = mass / (assumed_density * 4); // prolly better to fully randomise it 
 
         let color = ColorMaterial::from(Color::linear_rgb(
             fastrand::f32(),
@@ -322,5 +329,29 @@ let mut particles : Vec<_> = query.iter().map(|p| p.clone()).collect();
             part_b.vel[1] -= vy;
 
         }
+    }
+}
+
+fn gravity_quad(
+    cam_bounds: Res<CameraBounds>, 
+    g: Res<GravitationalConstant>,
+    theta: Res<BarnesHutTheta>,
+    mut query: Query<&mut Particle>
+){
+    let bounds = [cam_bounds.x_min, cam_bounds.y_min, cam_bounds.x_max, cam_bounds.y_max];
+
+    let mut root = node::new(bounds);
+    for particle in query.iter() {
+        root.insert(particle.clone());
+    }
+
+    for mut particle in query.iter_mut(){
+        let mut force = [0.0, 0.0];
+        root.calculate_force(&particle, theta.0, &mut force, g.0);
+
+        particle.vel[0] += force[0] / particle.mass as f32;
+        particle.vel[1] += force[1] / particle.mass as f32;
+        particle.pos[0] += particle.vel[0];
+        particle.pos[1] += particle.vel[1];
     }
 }
