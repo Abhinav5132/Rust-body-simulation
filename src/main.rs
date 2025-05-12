@@ -1,11 +1,13 @@
-use bevy::prelude::*;
+use bevy::input::mouse::MouseWheel;
+use bevy::{prelude::*, transform};
 use bevy::input::ButtonState;
 use bevy::input::keyboard::{Key, KeyboardInput};
-use bevy::window::{WindowMode, WindowResolution};
+use bevy::{input::mouse::AccumulatedMouseScroll};
+use bevy::window::{WindowMode, WindowResolution, };
 use classes::KdNode;
 use bevy_dev_tools::fps_overlay:: FpsOverlayPlugin;
 use rayon::iter::IntoParallelIterator;
-use crate::quad::node;
+use crate::quad::QuadNode;
 use rayon::prelude::*;
 mod quad;
 mod classes;
@@ -71,12 +73,13 @@ fn main() {
    ),FpsOverlayPlugin::default()))
 
 
-   .insert_resource(NoOfParticle(15000)) //10 for now
+   .insert_resource(NoOfParticle(500000)) //10 for now
    .insert_resource(TextID(None))
-   .insert_resource(CameraBounds{x_min:-960., x_max:960., y_min:-540., y_max:540.})
-   .insert_resource(GravitationalConstant(6.67430e-5))
-   .insert_resource(BarnesHutTheta(1.0))
+   .insert_resource(CameraBounds{x_min:-3480., x_max:3480., y_min:-2160., y_max:2160.})
+   .insert_resource(GravitationalConstant(6.67430e-4))
+   .insert_resource(BarnesHutTheta(0.5))
    .add_systems(Startup, spawn_camera)
+   .add_systems(Update, camera_zoom)
 
     // first state code
    .insert_state(GameStates::TextState)
@@ -89,7 +92,8 @@ fn main() {
    //.add_systems(Update, kd_tree_collisions.run_if(in_state(GameStates::SimulationState)))
    .add_systems(Update, par_kd_tree_collisions.run_if(in_state(GameStates::SimulationState)))
    //.add_systems(Update, gravity_quad.run_if(in_state(GameStates::SimulationState)))
-   .add_systems(Update, _gravity_normal.run_if(in_state(GameStates::SimulationState)))
+   .add_systems(Update, par_gravity_quad.run_if(in_state(GameStates::SimulationState)))
+   //.add_systems(Update, _gravity_normal.run_if(in_state(GameStates::SimulationState)))
    //.add_systems(Update, _check_collision.run_if(in_state(GameStates::SimulationState)))
    ;
     app.run();
@@ -100,7 +104,52 @@ fn spawn_camera(
 ) {
     commands.spawn(Camera2d);// spawn the camera
 }
+fn camera_zoom(
+    mut mouse_wheel_input: EventReader<MouseWheel>,
+    mut KeyboardInput: EventReader<KeyboardInput>,
+    mut query: Query<&mut Transform, With<Camera2d>>,
+){
+    let zoom_speed = 0.15;
+    let pan_speed = 30.0;
+    let mut zoom_delta = 0.0;
 
+    for event in mouse_wheel_input.read(){
+        zoom_delta += event.y;
+    }
+    if zoom_delta.abs() > 0.0 {
+        for mut transform in query.iter_mut() {
+            let scale_change = 1.0 - zoom_speed * zoom_delta.signum();
+            transform.scale *= scale_change;
+            transform.scale.x = transform.scale.x.clamp(0.05, 10.0);
+            transform.scale.y = transform.scale.y.clamp(0.05, 10.0);
+        }
+    }
+    for event in KeyboardInput.read(){
+        for mut transform in query.iter_mut(){
+        match &event.logical_key{
+            Key::ArrowLeft => {
+                transform.translation.x -= pan_speed;
+                }
+
+            Key::ArrowRight => {
+                transform.translation.x += pan_speed;
+            }
+
+            Key::ArrowUp => {
+                transform.translation.y += pan_speed;
+            }
+            Key::ArrowDown => {
+                transform.translation.y -= pan_speed;
+            }
+            _=>{}
+            }
+        }
+    }
+
+    
+
+
+}
 fn text_setup(
 	mut commands: Commands,
 	asset_server : Res<AssetServer>,
@@ -190,7 +239,7 @@ fn create_all_entitites(
         //let vy = 0.0;
         let mass = fastrand::u64(mass_min..mass_max);
 
-        let radius:u64 = mass / (assumed_density * 10); // prolly better to fully randomise it 
+        let radius:u64 = mass / (assumed_density * 12); // prolly better to fully randomise it 
 
         let color = ColorMaterial::from(Color::linear_rgb(
             fastrand::f32(),
@@ -210,6 +259,8 @@ fn create_all_entitites(
         MeshMaterial2d(materials.add(color)),
         Transform::from_xyz(x as f32, y as f32, 0.0),
         ));
+
+        
 
 
     }
@@ -370,7 +421,7 @@ let forces: Vec<_> = (0..particles.len()).into_par_iter().map(|i| {
         particle.vel[1] += force[1] / 1000.0;
     }
 }
-/* 
+ 
 fn gravity_quad(
     cam_bounds: Res<CameraBounds>, 
     g: Res<GravitationalConstant>,
@@ -379,9 +430,9 @@ fn gravity_quad(
 ){
     let bounds = [cam_bounds.x_min, cam_bounds.y_min, cam_bounds.x_max, cam_bounds.y_max];
 
-    let mut root = node::new(bounds);
+    let mut root = QuadNode::new(bounds);
     for particle in query.iter() {
-        root.insert(particle.clone());
+        root.insert(particle.clone(), 0); // Pass depth = 0
     }
 
     for mut particle in query.iter_mut(){
@@ -394,4 +445,38 @@ fn gravity_quad(
         particle.pos[1] += particle.vel[1];
     }
 }
-*/
+
+fn par_gravity_quad(
+    cam_bounds: Res<CameraBounds>, 
+    g: Res<GravitationalConstant>,
+    theta: Res<BarnesHutTheta>,
+    mut query: Query<&mut Particle>
+) {
+    let bounds = [cam_bounds.x_min, cam_bounds.y_min, cam_bounds.x_max, cam_bounds.y_max];
+
+    // Collect particles into a thread-safe vector
+    let particles: Vec<_> = query.iter().map(|p| p.clone()).collect();
+    
+    // Build the quadtree (this remains single-threaded as it's sequential)
+    let mut root = QuadNode::new(bounds);
+    for particle in &particles {
+        root.insert(particle.clone(), 0); // Pass depth = 0
+    }
+
+    // Calculate forces in parallel
+    let forces: Vec<_> = particles.par_iter()
+        .map(|particle| {
+            let mut force = [0.0, 0.0];
+            root.calculate_force(particle, theta.0, &mut force, g.0);
+            force
+        })
+        .collect();
+
+    // Apply forces to particles
+    for (mut particle, force) in query.iter_mut().zip(forces.iter()) {
+        particle.vel[0] += force[0] / particle.mass as f32;
+        particle.vel[1] += force[1] / particle.mass as f32;
+        particle.pos[0] += particle.vel[0];
+        particle.pos[1] += particle.vel[1];
+    }
+}
