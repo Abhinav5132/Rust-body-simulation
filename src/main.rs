@@ -4,8 +4,9 @@ use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::window::{WindowMode, WindowResolution};
 use classes::KdNode;
 use bevy_dev_tools::fps_overlay:: FpsOverlayPlugin;
+use rayon::iter::IntoParallelIterator;
 use crate::quad::node;
-
+use rayon::prelude::*;
 mod quad;
 mod classes;
 /*todo: make sure bodies dont spawn outside the area, this can be done in the create all entites where we iterate through them all, 
@@ -70,7 +71,7 @@ fn main() {
    ),FpsOverlayPlugin::default()))
 
 
-   .insert_resource(NoOfParticle(4000)) //10 for now
+   .insert_resource(NoOfParticle(15000)) //10 for now
    .insert_resource(TextID(None))
    .insert_resource(CameraBounds{x_min:-960., x_max:960., y_min:-540., y_max:540.})
    .insert_resource(GravitationalConstant(6.67430e-5))
@@ -85,9 +86,10 @@ fn main() {
    //simulation state
    .add_systems(OnEnter(GameStates::SimulationState), create_all_entitites)
    .add_systems(Update, update_all_entities.run_if(in_state(GameStates::SimulationState)))
-   .add_systems(Update, kd_tree_collisions.run_if(in_state(GameStates::SimulationState)))
-   .add_systems(Update, gravity_quad.run_if(in_state(GameStates::SimulationState)))
-   //.add_systems(Update, _gravity_normal.run_if(in_state(GameStates::SimulationState)))
+   //.add_systems(Update, kd_tree_collisions.run_if(in_state(GameStates::SimulationState)))
+   .add_systems(Update, par_kd_tree_collisions.run_if(in_state(GameStates::SimulationState)))
+   //.add_systems(Update, gravity_quad.run_if(in_state(GameStates::SimulationState)))
+   .add_systems(Update, _gravity_normal.run_if(in_state(GameStates::SimulationState)))
    //.add_systems(Update, _check_collision.run_if(in_state(GameStates::SimulationState)))
    ;
     app.run();
@@ -188,7 +190,7 @@ fn create_all_entitites(
         //let vy = 0.0;
         let mass = fastrand::u64(mass_min..mass_max);
 
-        let radius:u64 = mass / (assumed_density * 4); // prolly better to fully randomise it 
+        let radius:u64 = mass / (assumed_density * 10); // prolly better to fully randomise it 
 
         let color = ColorMaterial::from(Color::linear_rgb(
             fastrand::f32(),
@@ -229,14 +231,14 @@ fn update_all_entities(
             particle.vel[0] = particle.vel[0] * -1.0;   
         } 
         
-        particle.pos[0] += particle.vel[0] ;
+        particle.pos[0] += particle.vel[0] * 0.99;
         transform.translation.x = particle.pos[0];
 
         if particle.pos[1] + particle.vel[1] >= camera_bound.y_max 
         || particle.pos[1] + particle.vel[1] <= camera_bound.y_min{
             particle.vel[1] = particle.vel[1] * -1.0;
         } 
-        particle.pos[1] += particle.vel[1];
+        particle.pos[1] += particle.vel[1]* 0.99;
         transform.translation.y = particle.pos[1]; }
     //update_position(query);
 
@@ -299,39 +301,76 @@ fn kd_tree_collisions(mut query: Query<&mut Particle>) {
     }
 }
 
-fn _gravity_normal(query: Query<&mut Particle>, gravity: Res<GravitationalConstant>) {
-let mut particles : Vec<_> = query.iter().map(|p| p.clone()).collect();
+fn par_kd_tree_collisions(mut query: Query<&mut Particle>) {
+    let particles: Vec<_> = query.iter().map(|p| p.clone()).collect();
 
-    for i in 0..particles.len(){
-        let (left, right) = particles.split_at_mut(i+1);
-        let part_a = &mut left[i];
-        for j in i+1..right.len(){
-            let part_b = &mut right[j];
+    if let Some(tree) = KdNode::build(particles.clone(), 0) {
+        // Calculate collisions in parallel
+        let collision_results: Vec<_> = particles.par_iter()
+            .map(|particle| {
+                let mut collisions = Vec::new();
+                tree.check_collison(particle, &mut collisions);
+                (particle.clone(), collisions)
+            })
+            .collect();
 
-            let dx = part_a.pos[0] - part_b.pos[0];
-            let dy = part_a.pos[1] - part_b.pos[1];
+        // Apply collision responses
+        for (mut particle, (_, collisions)) in query.iter_mut().zip(collision_results.iter()) {
+            for (other, nx, ny, sep_x, sep_y) in collisions {
+                particle.pos[0] += sep_x;
+                particle.pos[1] += sep_y;
 
-            let dist_square = dx * dx + dy * dy;
+                let m1 = particle.mass as f32;
+                let m2 = other.mass as f32;
 
-            let force = (gravity.0 * part_a.mass as f32 * part_b.mass as f32) / dist_square;
-
-            let distance = dist_square.sqrt();
-            let nx = dx / distance;
-            let ny = dy / distance;
-
-            let vx = nx * force;
-            let vy = ny * force;
-
-            part_a.vel[0] -= vx;
-            part_a.vel[1] -= vy;
-
-            part_b.vel[0] -= vx;
-            part_b.vel[1] -= vy;
-
+                let bounciness = 0.8;
+                let j = -(1.0 + bounciness) * 
+                    ((particle.vel[0] - other.vel[0]) * nx + 
+                     (particle.vel[1] - other.vel[1]) * ny) / 
+                    (1.0/m1 + 1.0/m2);
+            
+                particle.vel[0] += (j / m1) * nx;
+                particle.vel[1] += (j / m1) * ny;
+            }
         }
     }
 }
 
+fn _gravity_normal(mut query: Query<&mut Particle>, gravity: Res<GravitationalConstant>) {
+let mut particles : Vec<_> = query.iter().map(|p| p.clone()).collect();
+
+let forces: Vec<_> = (0..particles.len()).into_par_iter().map(|i| {
+    let mut force = [0.0, 0.0];
+
+    for j in 0..particles.len(){
+        if i!= j {
+            let part_a = &particles[i];
+            let part_b = &particles[j];
+
+            let dx = part_a.pos[0] - part_b.pos[0];
+            let dy = part_a.pos[1] - part_b.pos[1];
+
+            let dist_square = dx * dx + dy * dy+ 1e-6;
+            let distance = dist_square.sqrt();
+            if distance < 1e-3 { continue; }
+
+            let f= (gravity.0 * part_a.mass as f32 * part_b.mass as f32) / dist_square;
+            let nx = dx / distance;
+            let ny = dy / distance;
+
+            force[0] -= nx * f;
+            force[1] -= ny * f;
+        }
+        }
+        force
+    }).collect();
+
+    for (mut particle, force) in query.iter_mut().zip(forces.iter()){
+        particle.vel[0] += force[0] / 1000.0;
+        particle.vel[1] += force[1] / 1000.0;
+    }
+}
+/* 
 fn gravity_quad(
     cam_bounds: Res<CameraBounds>, 
     g: Res<GravitationalConstant>,
@@ -355,3 +394,4 @@ fn gravity_quad(
         particle.pos[1] += particle.vel[1];
     }
 }
+*/

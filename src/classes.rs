@@ -36,7 +36,7 @@ impl KdNode{
         sorted_particles.sort_by(|a, b| {
         let coord_a = if axis == 0 { a.pos[0] } else { a.pos[1] };
         let coord_b = if axis == 0 { b.pos[0] } else { b.pos[1] };
-        coord_a.partial_cmp(&coord_b).unwrap()
+        coord_a.partial_cmp(&coord_b).unwrap_or(std::cmp::Ordering::Equal)
         });
 
         let median = sorted_particles.len() / 2;
