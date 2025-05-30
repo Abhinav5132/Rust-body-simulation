@@ -1,8 +1,9 @@
+use std::{string, usize};
+
 use bevy::input::mouse::MouseWheel;
-use bevy::{prelude::*, transform};
+use bevy::prelude::*;
 use bevy::input::ButtonState;
 use bevy::input::keyboard::{Key, KeyboardInput};
-use bevy::{input::mouse::AccumulatedMouseScroll};
 use bevy::window::{WindowMode, WindowResolution, };
 use classes::KdNode;
 use bevy_dev_tools::fps_overlay:: FpsOverlayPlugin;
@@ -11,22 +12,15 @@ use crate::quad::QuadNode;
 use rayon::prelude::*;
 mod quad;
 mod classes;
-/*todo: make sure bodies dont spawn outside the area, this can be done in the create all entites where we iterate through them all, 
-check for collisions with the boundry and if it does remove  
-3.turn the resolution into actual parameters so users can resize the screen
-5.collissions with each other
-5.gravity
-6. make the r key restart the simulation
-7.particle only bounce from the wall if their center touches, need to make it so it takes the radisu and bounces from that
-*/
+
 #[derive(Resource)]
-pub struct BarnesHutTheta(pub f32);
+pub struct BarnesHutTheta(pub f32); // Barnes Hut constant
 
 #[derive(Component)]
 struct FpsText;
 
 #[derive(Resource)]
-struct GravitationalConstant(f32);
+struct GravitationalConstant(f32); // Graviational constant
 
 #[derive(Resource)]
 struct NoOfParticle(u32);
@@ -73,10 +67,10 @@ fn main() {
    ),FpsOverlayPlugin::default()))
 
 
-   .insert_resource(NoOfParticle(500000)) //10 for now
+   .insert_resource(NoOfParticle(100000)) //<- No of particles 
    .insert_resource(TextID(None))
    .insert_resource(CameraBounds{x_min:-3480., x_max:3480., y_min:-2160., y_max:2160.})
-   .insert_resource(GravitationalConstant(6.67430e-4))
+   .insert_resource(GravitationalConstant(6.67430e-2))
    .insert_resource(BarnesHutTheta(0.5))
    .add_systems(Startup, spawn_camera)
    .add_systems(Update, camera_zoom)
@@ -89,12 +83,20 @@ fn main() {
    //simulation state
    .add_systems(OnEnter(GameStates::SimulationState), create_all_entitites)
    .add_systems(Update, update_all_entities.run_if(in_state(GameStates::SimulationState)))
-   //.add_systems(Update, kd_tree_collisions.run_if(in_state(GameStates::SimulationState)))
-   .add_systems(Update, par_kd_tree_collisions.run_if(in_state(GameStates::SimulationState)))
-   //.add_systems(Update, gravity_quad.run_if(in_state(GameStates::SimulationState)))
-   .add_systems(Update, par_gravity_quad.run_if(in_state(GameStates::SimulationState)))
+
+   //Brute force:
    //.add_systems(Update, _gravity_normal.run_if(in_state(GameStates::SimulationState)))
    //.add_systems(Update, _check_collision.run_if(in_state(GameStates::SimulationState)))
+
+   // algorithmic solutions:
+   //.add_systems(Update, kd_tree_collisions.run_if(in_state(GameStates::SimulationState)))
+   //.add_systems(Update, gravity_quad.run_if(in_state(GameStates::SimulationState)))
+
+   // paralelized algorithmic solutions(current fastest solution)
+   .add_systems(Update, par_kd_tree_collisions.run_if(in_state(GameStates::SimulationState)))
+   .add_systems(Update, par_gravity_quad.run_if(in_state(GameStates::SimulationState)))
+   
+   
    ;
     app.run();
 }
@@ -104,9 +106,11 @@ fn spawn_camera(
 ) {
     commands.spawn(Camera2d);// spawn the camera
 }
+
+// handel camera zoom and panning.
 fn camera_zoom(
     mut mouse_wheel_input: EventReader<MouseWheel>,
-    mut KeyboardInput: EventReader<KeyboardInput>,
+    mut keyboard_input: EventReader<KeyboardInput>,
     mut query: Query<&mut Transform, With<Camera2d>>,
 ){
     let zoom_speed = 0.15;
@@ -124,7 +128,7 @@ fn camera_zoom(
             transform.scale.y = transform.scale.y.clamp(0.05, 10.0);
         }
     }
-    for event in KeyboardInput.read(){
+    for event in keyboard_input.read(){
         for mut transform in query.iter_mut(){
         match &event.logical_key{
             Key::ArrowLeft => {
@@ -156,7 +160,7 @@ fn text_setup(
 	mut text_id: ResMut<TextID>,
 ) {
     
-    let id_text = commands.spawn(( // spawn in the text
+    let id_text = commands.spawn(( 
         Text::new("Please enter the number of bodies:"),
         TextFont{
             font: asset_server.load("fonts/BungeeSpice-Regular.ttf"),
@@ -172,7 +176,7 @@ fn text_setup(
         },
     )).id();
 
-	text_id.0 = Some(id_text); // some means something of any type 
+	text_id.0 = Some(id_text);
 }
 
 
@@ -181,9 +185,11 @@ fn text_update(
     mut evr_kbd : EventReader<KeyboardInput>,
 	mut text_id: ResMut<TextID>,
 	mut next_state: ResMut<NextState<GameStates>>,
+    mut string: Local<String>,
+    mut no_of_particle: ResMut<NoOfParticle>,
+    mut query: Query<&mut Text>,
 ) {
-    let mut localstring : String = "".to_string();
-
+    let mut text_changed = false;
     for ev in evr_kbd.read() {
         // We don't care about key releases, only key presses
         if ev.state == ButtonState::Released {
@@ -195,13 +201,25 @@ fn text_update(
                 if abc.chars().any(|c| c.is_control()) {
                     continue;
                 }
-                localstring.push_str(&abc);
+
+                for c in abc.chars() {
+                    if c.is_ascii_digit() {
+                        string.push(c);
+                        text_changed = true;
+                    }
+                }
+                
             }
 
             Key::Enter => {
 				//write to Noofparticle
 
+                if let Ok(num) = string.parse::<u32>() {
+                    no_of_particle.0 = num;
+                }
+
                 if let Some(entity) = text_id.0 {
+                    println!("no enetered: {}", &*string);
 					commands.entity(entity).despawn(); // despawn UI text
 					text_id.0 = None; // Clear the resource if needed
 				}
@@ -210,12 +228,20 @@ fn text_update(
             }
 
             Key::Backspace => {
-                localstring.pop();
+                string.pop();
             }
 
             _ => {}
         }
     } 
+
+    if text_changed{
+        if let Some(entity) = text_id.0{
+            if let Ok(mut text) = query.get_mut(entity) {
+                // text.0[0].value = string.clone();
+            }
+        }
+    }
 }
 
 fn create_all_entitites(
@@ -230,7 +256,7 @@ fn create_all_entitites(
 
     let assumed_density = 55; // in kg/m3
 
-        for _i in 0..no_of_part.0{
+        let particles: Vec<_> = (0..no_of_part.0).into_par_iter().map(|_|{
         let x = fastrand::i32(camera_bound.x_min as i32..camera_bound.x_max as i32); //CHANGE this to not be inclusive of borders
         let y = fastrand::i32(camera_bound.y_min as i32..camera_bound.y_max as i32);
         let vx = fastrand::f32() * if fastrand::bool() {1.0} else {-1.0};
@@ -245,24 +271,29 @@ fn create_all_entitites(
             fastrand::f32(),
             fastrand::f32(),
             fastrand::f32(),
-            ));
-        
-            commands.spawn((
-            Particle {
-            pos: [x as f32,y as f32],
-            vel: [vx, vy],
-            mass: mass,
-            radius: radius,
-
-        },
-        Mesh2d(meshes.add(Circle::new(radius as f32))),
-        MeshMaterial2d(materials.add(color)),
-        Transform::from_xyz(x as f32, y as f32, 0.0),
         ));
-
         
+        (
+            Particle {
+                pos: [x as f32, y as f32],
+                vel: [vx, vy],
+                mass: mass,
+                radius: radius,
+            },
+            color,
+            radius as f32,
+            x as f32,
+            y as f32,
+        )
+    }).collect();
 
-
+    for (particle, color, radius, x, y) in particles{
+        commands.spawn((
+            particle,
+            Mesh2d(meshes.add(Circle::new(radius as f32))),
+            MeshMaterial2d(materials.add(color)),
+            Transform::from_xyz(x, y, 0.0),
+        ));
     }
 
 }
@@ -273,10 +304,9 @@ fn update_all_entities(
 ){ // this is where all the particles are moved and gravity 
 
 // moving particles with their initial velocity
-
+    let mut particles: Vec<(Particle, Transform)> = query.iter().map(|(p,t)| (p.clone(), t.clone())).collect();
     //fn update_position(mut query: Query<(&mut Particle, &mut Transform)>){
-    for (mut particle, mut transform) in query.iter_mut(){
-
+    particles.par_iter_mut().for_each(|(particle, transform)| {
         if particle.pos[0] + particle.vel[0] >= camera_bound.x_max 
         || particle.pos[0] + particle.vel[0] <= camera_bound.x_min{
             particle.vel[0] = particle.vel[0] * -1.0;   
@@ -290,8 +320,12 @@ fn update_all_entities(
             particle.vel[1] = particle.vel[1] * -1.0;
         } 
         particle.pos[1] += particle.vel[1]* 0.99;
-        transform.translation.y = particle.pos[1]; }
-    //update_position(query);
+        transform.translation.y = particle.pos[1]; });
+
+        for ((mut p, mut t), (new_p, new_t)) in query.iter_mut().zip(particles.into_iter()) {
+            *p = new_p;
+            *t = new_t;
+        }
 
 }
 
