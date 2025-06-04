@@ -1,4 +1,3 @@
-use std::{string, usize};
 
 use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
@@ -51,6 +50,19 @@ struct Particle{
 }
 
 
+unsafe extern "C" {
+    fn launch_calculate_gravity(
+        pos_x: *mut f32,
+        pos_y: *mut f32,
+        vel_x: *mut f32,
+        vel_y: *mut f32,
+        mass: *mut f32,
+        num_particles: i32,
+        gravitational_constant: f32,
+    );
+}
+
+
 fn main() {
    let mut app = App::new();
 
@@ -67,7 +79,7 @@ fn main() {
    ),FpsOverlayPlugin::default()))
 
 
-   .insert_resource(NoOfParticle(100000)) //<- No of particles 
+   .insert_resource(NoOfParticle(10000)) //<- No of particles 
    .insert_resource(TextID(None))
    .insert_resource(CameraBounds{x_min:-3480., x_max:3480., y_min:-2160., y_max:2160.})
    .insert_resource(GravitationalConstant(6.67430e-2))
@@ -94,11 +106,11 @@ fn main() {
 
    // paralelized algorithmic solutions(current fastest solution)
    .add_systems(Update, par_kd_tree_collisions.run_if(in_state(GameStates::SimulationState)))
-   .add_systems(Update, par_gravity_quad.run_if(in_state(GameStates::SimulationState)))
+   //.add_systems(Update, par_gravity_quad.run_if(in_state(GameStates::SimulationState)))
    
-   
-   ;
-    app.run();
+   // gpu brute force solutions
+   .add_systems(Update, cuda_gravity_brute.run_if(in_state(GameStates::SimulationState)));
+       app.run();
 }
 
 fn spawn_camera(
@@ -486,6 +498,7 @@ fn par_gravity_quad(
     theta: Res<BarnesHutTheta>,
     mut query: Query<&mut Particle>
 ) {
+
     let bounds = [cam_bounds.x_min, cam_bounds.y_min, cam_bounds.x_max, cam_bounds.y_max];
 
     // Collect particles into a thread-safe vector
@@ -513,4 +526,44 @@ fn par_gravity_quad(
         particle.pos[0] += particle.vel[0];
         particle.pos[1] += particle.vel[1];
     }
+}
+
+fn cuda_gravity_brute(
+    mut query: Query<&mut Particle>,
+    gravity: Res<GravitationalConstant>,
+    particleCount: Res<NoOfParticle>
+) {
+    let count = particleCount.0 as usize;
+    let g = gravity.0;
+    let mut pos_x:Vec<f32> = Vec::with_capacity(count);
+    let mut pos_y:Vec<f32> = Vec::with_capacity(count);
+    let mut vel_x:Vec<f32> = Vec::with_capacity(count);
+    let mut vel_y:Vec<f32> = Vec::with_capacity(count);
+    let mut mass:Vec<f32> = Vec::with_capacity(count);
+
+    for particle in query.iter() {
+        pos_x.push(particle.pos[0]);
+        pos_y.push(particle.pos[1]);
+        vel_x.push(particle.vel[0]);
+        vel_y.push(particle.vel[1]);
+        mass.push(particle.mass as f32);
+    }
+
+    unsafe{
+        launch_calculate_gravity(
+            pos_x.as_mut_ptr(),
+            pos_y.as_mut_ptr(),
+            vel_x.as_mut_ptr(),
+            vel_y.as_mut_ptr(),
+            mass.as_mut_ptr(),
+            count as i32,
+            g,
+            );
+    }
+
+    for (i, mut particle) in query.iter_mut().enumerate() {
+        particle.vel[0] = vel_x[i];
+        particle.vel[1] = vel_y[i];
+    }
+    
 }

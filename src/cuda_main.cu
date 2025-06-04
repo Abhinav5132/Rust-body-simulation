@@ -1,10 +1,14 @@
-extern "C" {
+#include "cuda_runtime.h"
+
+#include "device_launch_parameters.h"
+#include <stdio.h>
+
 __global__ void calculate_gravity(float* pos_x, float* pos_y, 
     float* vel_x, float* vel_y ,
     float* mass, int num_particles, float gravitational_constant) 
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i > num_particles) {return;}
+    if (i >= num_particles) {return;}
 
     float fx = 0.0f;
     float fy = 0.0f; 
@@ -27,16 +31,27 @@ __global__ void calculate_gravity(float* pos_x, float* pos_y,
         float f = (gravitational_constant * massi * mass[j]) / dist_sqr;
 
         float nx = dx / distance;
-        float ny = dx / distance;
+        float ny = dy / distance;
 
         fx -= nx * f;
-        fy -= nx * f;
+        fy -= ny * f;
 
 
     }
 
-    vel_x[i] = fx / 1000.0f;
-    vel_y[i] = fy / 1000.0f;
+    vel_x[i] += fx;
+    vel_y[i] += fy;
 
-    }
+}
+extern "C" void launch_calculate_gravity(
+    float* pos_x, float* pos_y, 
+    float* vel_x, float* vel_y ,
+    float* mass, int num_particles, float gravitational_constant
+) {
+    int threads = 1024;
+    int blocks = (num_particles + threads -1) / threads;
+    calculate_gravity<<<blocks, threads>>> (
+        pos_x, pos_y, vel_x, vel_y, mass,num_particles, gravitational_constant
+    );
+    
 }
