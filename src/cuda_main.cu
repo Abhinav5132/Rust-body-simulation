@@ -14,7 +14,7 @@ typedef unsigned int uint;
 
 
 
-void initialize_particles(uint no_of_particles, float x_bounds, float y_bounds) {
+extern "C" void initialize_particles(uint no_of_particles, float x_bounds, float y_bounds) {
     //allocate memory for screen bounds(never mutated and of size 1 float)
     float* d_x_bounds = 0;
     float* d_y_bounds = 0;
@@ -84,4 +84,14 @@ __global__ void init_particles(
     radius[i] = sqrt(mass[i] / (10 * 3.141));
 
     
+}
+
+extern "C" void read_particle_positions(float* h_pos_x, float* h_pos_y, int no_of_particles) {
+    cudaMemcpy(h_pos_x, d_pos_x, sizeof(float) * no_of_particles, cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_pos_y, d_pos_y, sizeof(float) * no_of_particles, cudaMemcpyDeviceToHost);
+}
+
+void read_particle_velocities(float* h_vel_x, float* h_vel_y, int no_of_particles) {
+    cudaMemcpy(h_vel_x, d_vel_x, sizeof(float) * no_of_particles, cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_vel_y, d_vel_y, sizeof(float) * no_of_particles, cudaMemcpyDeviceToHost);
 }
