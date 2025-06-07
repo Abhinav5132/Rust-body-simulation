@@ -1,57 +1,87 @@
-#include "cuda_runtime.h"
+#include <iostream>
+#include <random>
+#include <curand_kernel.h>
+#include <cuda_runtime.h>
+typedef unsigned int uint;
 
-#include "device_launch_parameters.h"
-#include <stdio.h>
-
-__global__ void calculate_gravity(float* pos_x, float* pos_y, 
-    float* vel_x, float* vel_y ,
-    float* mass, int num_particles, float gravitational_constant) 
-{
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i >= num_particles) {return;}
-
-    float fx = 0.0f;
-    float fy = 0.0f; 
-
-    float xi = pos_x[i];
-    float yi = pos_y[i];
-    float massi = mass[i];
-
-    for (int j = 0; j < num_particles; j++) {
-        if (j == i) {
-            continue;
-        }
-        float dx = xi - pos_x[j];
-        float dy = yi - pos_y[j]; 
-        float dist_sqr = dx*dx + dy*dy + 1e-6;
-        float distance = sqrtf(dist_sqr);
-
-        if (distance < 1e-3 ) {continue;}
-
-        float f = (gravitational_constant * massi * mass[j]) / dist_sqr;
-
-        float nx = dx / distance;
-        float ny = dy / distance;
-
-        fx -= nx * f;
-        fy -= ny * f;
+// particle position
+    float* d_pos_x;
+    float* d_pos_y;
+    float* d_vel_x;
+    float* d_vel_y;
+    uint* d_mass;
+    uint* d_radius;
 
 
+
+void initialize_particles(uint no_of_particles, float x_bounds, float y_bounds) {
+    //allocate memory for screen bounds(never mutated and of size 1 float)
+    float* d_x_bounds = 0;
+    float* d_y_bounds = 0;
+
+    cudaMalloc(&d_x_bounds, sizeof(float));
+    cudaMalloc(&d_y_bounds, sizeof(float));
+    
+    //copy screen bounds
+    cudaMemcpy(d_pos_x, &x_bounds, sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_pos_y, &y_bounds, sizeof(float), cudaMemcpyHostToDevice);
+
+    //allocate memory for properties of particels.
+    cudaMalloc(&d_pos_x, no_of_particles * sizeof(float));
+    cudaMalloc(&d_pos_y, no_of_particles * sizeof(float));
+    cudaMalloc(&d_vel_x, no_of_particles * sizeof(float));
+    cudaMalloc(&d_vel_y, no_of_particles * sizeof(float));
+    cudaMalloc(&d_mass, no_of_particles * sizeof(uint));
+    cudaMalloc(&d_radius, no_of_particles * sizeof(uint));
+    
+    int threads = 512;
+    int blocks = (no_of_particles + threads - 1)/ threads;
+   
+    init_particles<<<blocks, threads>>>(
+        x_bounds, y_bounds, 
+        d_pos_x, d_pos_y, 
+        d_vel_x, d_vel_y, 
+        d_mass, d_radius, 
+        time(NULL), no_of_particles
+    );
+    cudaDeviceSynchronize();
+}
+
+__global__ void init_particles(
+    float x_bounds, 
+    float y_bounds,
+    float* pos_x, float* pos_y,
+    float* vel_x, float* vel_y,
+    uint* mass, uint* radius, 
+    uint seed, uint no_of_particles
+) {
+
+    //local bounds
+    float vel_bound_x = 1.0f;
+    float vel_bound_y = 1.0f;
+
+    int max_mass = 2000;
+    int min_mass = 1000;
+
+
+    int i = blockDim.x * blockIdx.x + threadIdx.x;
+    if(i >= no_of_particles) {
+        return;
     }
 
-    vel_x[i] += fx;
-    vel_y[i] += fy;
+    curandState state;
+    curand_init(seed+i, 0, 0, &state);
 
-}
-extern "C" void launch_calculate_gravity(
-    float* pos_x, float* pos_y, 
-    float* vel_x, float* vel_y ,
-    float* mass, int num_particles, float gravitational_constant
-) {
-    int threads = 1024;
-    int blocks = (num_particles + threads -1) / threads;
-    calculate_gravity<<<blocks, threads>>> (
-        pos_x, pos_y, vel_x, vel_y, mass,num_particles, gravitational_constant
-    );
+    //initializing positions 
+    pos_x[i] = (curand_uniform(&state)* 2.0f - 1.0f) * x_bounds;
+    pos_y[i] = (curand_uniform(&state)* 2.0f - 1.0f) * y_bounds;
+
+    //initializing velocities
+    vel_x[i] = (curand_uniform(&state)* 2.0f - 1.0f) * vel_bound_x;
+    vel_y[i] = (curand_uniform(&state)* 2.0f - 1.0f) * vel_bound_y;
+
+    mass[i] = min_mass + (curand(&state) % (max_mass - min_mass + 1));
+    radius[i] = sqrt(mass[i] / (10 * 3.141));
+
     
 }
