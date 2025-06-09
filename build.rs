@@ -2,10 +2,9 @@ fn main() {
 
     cc::Build::new()
         .cuda(true)
-        .flag("-std=c++14")
-        .flag("-ccbin")
-        .flag("/usr/bin/g++-11")
         .file("src/cuda_main.cu")
+        .flag("-std=c++14")
+        .flag("-ccbin=/usr/bin/g++-11") 
         .compile("cuda_gravity");
 
     println!("cargo:rustc-link-lib=static=cuda_gravity");
@@ -13,4 +12,5 @@ fn main() {
 
     println!("cargo:rustc-link-lib=dylib=cuda");
     println!("cargo:rustc-link-lib=dylib=cudart");
+    println!("cargo:rustc-link-lib=dylib=stdc++");
 }
