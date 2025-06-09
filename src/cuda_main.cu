@@ -87,5 +87,42 @@ extern "C" void read_particle_velocities(float* h_vel_x, float* h_vel_y, int no_
 }
 
 extern "C" void read_particle_radius(float* h_radius, int no_of_particles) {
+
     cudaMemcpy(h_radius, d_radius, sizeof(float) * no_of_particles, cudaMemcpyDeviceToHost);
-}   
+}  
+
+__global__ void update_particle_positions(
+    float* pos_x, float* pos_y,
+    float* vel_x, float* vel_y,
+    float x_bounds, float y_bounds
+) {
+    int i = blockDim.x * blockIdx.x + threadIdx.x;
+
+    if (vel_x[i] != 0.0){
+        pos_x[i] += vel_x[i];
+        if (pos_x[i] > x_bounds || pos_x[i] < -x_bounds) {
+            vel_x[i] = -vel_x[i];
+        }
+    }
+
+    if (vel_y[i] != 0.0) {
+        pos_y[i] += vel_y[i];
+        if (pos_y[i] > y_bounds || pos_y[i] < -y_bounds) {
+            vel_y[i] = -vel_y[i];
+        }
+    }
+}
+
+extern "C" void move_particles(uint no_of_particles, float x_bounds, float y_bounds) {
+    int threads = 512;
+    int blocks = (no_of_particles + threads - 1)/ threads;
+
+    update_particle_positions<<<blocks, threads>>> (
+        d_pos_x, d_pos_y, 
+        d_vel_x, d_vel_y, 
+        x_bounds, y_bounds
+    );
+    
+    cudaDeviceSynchronize();
+    
+}
