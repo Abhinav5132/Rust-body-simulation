@@ -43,6 +43,7 @@ fn main() {
     .add_systems(Startup, text_setup)
     .add_systems(Update, text_update.run_if(in_state(SimStates::TextState)))
     .add_systems(OnEnter(SimStates::SimulationState), create_particles)
+    .add_systems(Update, brute_force.run_if(in_state(SimStates::SimulationState)))
     .add_systems(Update, update_particles.run_if(in_state(SimStates::SimulationState)))
     
     ;
@@ -50,3 +51,11 @@ fn main() {
     app.run();
 }
 
+pub fn brute_force(
+    no_of_particles: ResMut<NoOfParticle>
+){
+    let grav_const = 6.6743e-5;
+    unsafe{
+        collisions_and_gravity(no_of_particles.0, grav_const);
+    }
+}

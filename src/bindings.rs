@@ -6,4 +6,6 @@ unsafe extern "C" {
     pub unsafe fn read_particle_radius(h_radius: *mut u32, no_of_particles: u32);
 
     pub unsafe fn move_particles(no_of_particles: u32, x_bounds: f32, y_bounds: f32);
+
+    pub unsafe fn collisions_and_gravity(no_of_particles: u32, gravitational_constant: f32);
 }
