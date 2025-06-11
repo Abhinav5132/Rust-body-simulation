@@ -3,8 +3,10 @@ fn main() {
     cc::Build::new()
         .cuda(true)
         .file("src/cuda_main.cu")
+        .file("src/brute_force.cu")
         .flag("-std=c++14")
         .flag("-ccbin=/usr/bin/g++-11") 
+        .include("src")
         .compile("cuda_gravity");
 
     println!("cargo:rustc-link-lib=static=cuda_gravity");
